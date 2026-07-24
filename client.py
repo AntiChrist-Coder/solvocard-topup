@@ -504,3 +504,40 @@ def is_topup_success(response: ApiResponse) -> bool:
         if isinstance(err, dict) and err:
             return False
     return True
+
+
+TRANSIENT_TOPUP_STATUSES = frozenset({429, 502, 503, 504})
+TRANSIENT_TOPUP_HINTS = (
+    "try again",
+    "too many",
+    "unable to process",
+    "temporarily",
+    "rate limit",
+    "busy",
+    "overloaded",
+)
+
+
+def response_message(response: ApiResponse) -> str:
+    if isinstance(response.data, dict):
+        err = response.data.get("error")
+        if isinstance(err, str) and err.strip():
+            return err.strip()
+        for key in ("message", "error", "detail", "code"):
+            if key in response.data:
+                val = response.data[key]
+                if isinstance(val, str) and val.strip():
+                    return val.strip()
+    text = response.text.strip()
+    if text:
+        return text.splitlines()[0][:240]
+    return f"HTTP {response.status_code}"
+
+
+def is_transient_topup_failure(response: ApiResponse) -> bool:
+    if response.status_code in TRANSIENT_TOPUP_STATUSES:
+        return True
+    if response.status_code >= 500:
+        msg = response_message(response).lower()
+        return any(hint in msg for hint in TRANSIENT_TOPUP_HINTS)
+    return False

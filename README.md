@@ -71,7 +71,7 @@ Cookies are saved locally to `panel_state.json` and reused on the next run.
 - **Stop** cancels retries for that card.
 - **Start all** / **Stop all** in the header control every card.
 - Retries stop automatically on success or if the session expires (401/403).
-- On **429 rate limits**, the tool pauses all topups, learns the wait time from response headers when available, and otherwise backs off automatically (starting at 60s, up to 15 minutes) before retrying.
+- On **429 / 500 “try again later”** responses, all topups pause together, backoff automatically (60s → up to 15 min), and only one topup request runs at a time.
 
 Suggested defaults: **$5** on the lowest-balance card, **$25** on others.
 
