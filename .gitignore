@@ -1,0 +1,10 @@
+config.json
+panel_state.json
+panel_log.json
+*.har
+
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env

@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SolvoCard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #030508;
+      --bg-elevated: #0a0e16;
+      --sidebar: rgba(8, 12, 20, 0.92);
+      --surface: rgba(14, 20, 32, 0.88);
+      --surface-2: rgba(20, 28, 44, 0.95);
+      --border: rgba(255, 255, 255, 0.07);
+      --border-hover: rgba(255, 255, 255, 0.14);
+      --text: #eef2ff;
+      --muted: #7d8da8;
+      --accent: #5b8cff;
+      --accent-2: #9d6bff;
+      --accent-soft: rgba(91, 140, 255, 0.14);
+      --ok: #2dd4a8;
+      --warn: #f5b942;
+      --err: #ff6b7a;
+      --radius: 18px;
+      --radius-sm: 11px;
+      --shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+      --ease: 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "DM Sans", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    .ambient {
+      position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 10% -10%, rgba(91, 140, 255, 0.18), transparent 55%),
+        radial-gradient(ellipse 60% 40% at 90% 10%, rgba(157, 107, 255, 0.14), transparent 50%),
+        radial-gradient(ellipse 50% 30% at 50% 100%, rgba(45, 212, 168, 0.06), transparent 45%);
+    }
+    .grid-noise {
+      position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: 0.35;
+      background-image: linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(ellipse 80% 70% at 50% 30%, black, transparent);
+    }
+    .shell {
+      position: relative; z-index: 1;
+      display: grid;
+      grid-template-columns: 240px 1fr 280px;
+      min-height: 100vh;
+    }
+    @media (max-width: 1100px) {
+      .shell { grid-template-columns: 240px 1fr; }
+      .active-rail { display: none; }
+    }
+    @media (max-width: 900px) {
+      .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    }
+    .content-col {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      min-width: 0;
+    }
+    .sidebar {
+      border-right: 1px solid var(--border);
+      background: var(--sidebar);
+      backdrop-filter: blur(20px);
+      padding: 1.25rem 1rem;
+      display: flex; flex-direction: column; gap: 1.5rem;
+      position: sticky; top: 0; height: 100vh;
+    }
+    @media (max-width: 900px) {
+      .sidebar { height: auto; position: relative; border-right: none; border-bottom: 1px solid var(--border); }
+    }
+    .brand { display: flex; align-items: center; gap: 0.75rem; padding: 0.25rem 0.5rem; }
+    .brand-mark {
+      width: 40px; height: 40px; border-radius: 12px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      display: grid; place-items: center; font-weight: 700;
+      box-shadow: 0 8px 24px rgba(91, 140, 255, 0.35);
+    }
+    .brand h1 { font-size: 1.05rem; letter-spacing: -0.02em; }
+    .brand p { font-size: 0.72rem; color: var(--muted); margin-top: 0.1rem; }
+    .nav { display: flex; flex-direction: column; gap: 0.25rem; flex: 1; }
+    @media (max-width: 900px) {
+      .nav { flex-direction: row; overflow-x: auto; padding-bottom: 0.25rem; }
+    }
+    .nav-btn {
+      display: flex; align-items: center; gap: 0.65rem;
+      padding: 0.65rem 0.85rem; border: none; border-radius: var(--radius-sm);
+      background: transparent; color: var(--muted); font: inherit; font-size: 0.88rem;
+      font-weight: 500; cursor: pointer; transition: var(--ease); text-align: left; white-space: nowrap;
+    }
+    .nav-btn svg { width: 18px; height: 18px; opacity: 0.7; flex-shrink: 0; }
+    .nav-btn:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+    .nav-btn.active {
+      color: var(--text); background: var(--accent-soft);
+      box-shadow: inset 0 0 0 1px rgba(91, 140, 255, 0.25);
+    }
+    .nav-btn.active svg { opacity: 1; color: var(--accent); }
+    .sidebar-foot {
+      padding: 0.75rem; border-radius: var(--radius-sm);
+      background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+      font-size: 0.72rem; color: var(--muted); line-height: 1.5;
+    }
+    .sidebar-foot strong { color: var(--text); display: block; margin-bottom: 0.35rem; font-size: 0.75rem; }
+    .main { padding: 1.25rem 1.5rem 1rem; overflow-x: hidden; flex: 1; min-height: 0; overflow-y: auto; }
+    @media (max-width: 900px) { .main { padding: 1rem; } }
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem;
+      animation: rise 0.45s ease both;
+    }
+    .topbar h2 { font-size: 1.35rem; letter-spacing: -0.03em; }
+    .topbar p { color: var(--muted); font-size: 0.85rem; margin-top: 0.2rem; }
+    .status-chip {
+      display: inline-flex; align-items: center; gap: 0.45rem;
+      padding: 0.4rem 0.85rem; border-radius: 999px; font-size: 0.78rem; font-weight: 500;
+      border: 1px solid var(--border); background: var(--surface);
+    }
+    .status-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+    .status-chip.online .dot { background: var(--ok); box-shadow: 0 0 12px rgba(45,212,168,0.6); animation: pulse 2s infinite; }
+    .status-chip.pending .dot { background: var(--warn); animation: pulse 1.4s infinite; }
+    .status-chip.offline .dot { background: var(--err); }
+    @keyframes pulse { 50% { opacity: 0.55; transform: scale(0.88); } }
+    @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+    .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+      padding: 0.55rem 1rem; border-radius: var(--radius-sm);
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text); font: inherit; font-size: 0.84rem; font-weight: 500;
+      cursor: pointer; transition: var(--ease);
+    }
+    .btn:hover:not(:disabled) { border-color: var(--border-hover); background: var(--surface-2); transform: translateY(-1px); }
+    .btn:disabled { opacity: 0.38; cursor: not-allowed; }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), #4a72e8);
+      border-color: transparent; box-shadow: 0 8px 24px rgba(91, 140, 255, 0.28);
+    }
+    .btn-danger { color: #ffb4bc; border-color: rgba(255,107,122,0.35); background: rgba(255,107,122,0.08); }
+    .btn-ghost { background: transparent; }
+    .btn.loading .spin { display: block; }
+    .spin {
+      display: none; width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,0.25); border-top-color: #fff;
+      border-radius: 50%; animation: spin 0.65s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .panel { display: none; animation: rise 0.35s ease both; }
+    .panel.active { display: block; }
+    .kpis {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.85rem; margin-bottom: 1.25rem;
+    }
+    @media (max-width: 800px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+    .kpi {
+      padding: 1rem 1.1rem; border-radius: var(--radius);
+      background: var(--surface); border: 1px solid var(--border);
+      position: relative; overflow: hidden; transition: var(--ease);
+    }
+    .kpi::before {
+      content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+      background: linear-gradient(180deg, var(--accent), var(--accent-2));
+    }
+    .kpi:hover { transform: translateY(-2px); border-color: var(--border-hover); }
+    .kpi-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; }
+    .kpi-value { font-size: 1.55rem; font-weight: 700; margin-top: 0.3rem; letter-spacing: -0.03em; }
+    .cards-grid {
+      display: grid; gap: 1.1rem;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    }
+    .cc {
+      border-radius: var(--radius); overflow: hidden;
+      background: var(--surface); border: 1px solid var(--border);
+      transition: var(--ease); animation: rise 0.4s ease both;
+    }
+    .cc:hover { border-color: var(--border-hover); box-shadow: var(--shadow); transform: translateY(-4px); }
+    .cc.running { border-color: rgba(245, 185, 66, 0.35); }
+    .cc.success { border-color: rgba(45, 212, 168, 0.35); }
+    .cc-face {
+      padding: 1.25rem; min-height: 148px;
+      background: linear-gradient(135deg, rgba(91,140,255,0.22) 0%, rgba(157,107,255,0.18) 50%, rgba(8,12,20,0.9) 100%);
+      position: relative;
+    }
+    .cc.running .cc-face { background: linear-gradient(135deg, rgba(245,185,66,0.2), rgba(91,140,255,0.15), rgba(8,12,20,0.92)); }
+    .cc.success .cc-face { background: linear-gradient(135deg, rgba(45,212,168,0.22), rgba(91,140,255,0.12), rgba(8,12,20,0.92)); }
+    .cc-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; }
+    .chip {
+      width: 38px; height: 28px; border-radius: 6px;
+      background: linear-gradient(135deg, #d4af37, #f5e6a8 40%, #c9a227);
+      opacity: 0.85;
+    }
+    .cc-balance { font-size: 1.85rem; font-weight: 700; letter-spacing: -0.04em; }
+    .cc-label { font-size: 0.95rem; font-weight: 600; margin-top: 0.35rem; }
+    .cc-num { font-family: "JetBrains Mono", monospace; font-size: 0.78rem; color: rgba(255,255,255,0.55); margin-top: 0.2rem; }
+    .badge {
+      font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+      padding: 0.28rem 0.6rem; border-radius: 999px; border: 1px solid var(--border);
+    }
+    .badge.run { color: var(--warn); border-color: rgba(245,185,66,0.4); background: rgba(245,185,66,0.1); }
+    .badge.ok { color: var(--ok); border-color: rgba(45,212,168,0.4); background: rgba(45,212,168,0.1); }
+    .badge.low { color: #93c5fd; border-color: rgba(147,197,253,0.35); background: rgba(147,197,253,0.08); }
+    .cc-body { padding: 1rem 1.25rem 1.25rem; }
+    .meta { display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem; font-size: 0.78rem; color: var(--muted); margin-bottom: 1rem; }
+    .meta b { color: var(--text); font-weight: 500; }
+    .topup-row { display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap; margin-bottom: 0.85rem; }
+    .topup-row label { font-size: 0.75rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+    input, textarea {
+      background: rgba(0,0,0,0.35); border: 1px solid var(--border); border-radius: var(--radius-sm);
+      color: var(--text); font: inherit; padding: 0.55rem 0.75rem; transition: var(--ease); width: 100%;
+    }
+    input:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(91,140,255,0.2); }
+    input[type=number] { width: 110px; font-family: "JetBrains Mono", monospace; }
+    textarea { font-family: "JetBrains Mono", monospace; font-size: 0.74rem; min-height: 120px; resize: vertical; line-height: 1.55; }
+    .cc-actions { display: flex; gap: 0.45rem; flex-wrap: wrap; }
+    .note { font-family: "JetBrains Mono", monospace; font-size: 0.68rem; color: var(--muted); margin-top: 0.6rem; line-height: 1.45; word-break: break-all; }
+    .alert {
+      padding: 0.9rem 1rem; border-radius: var(--radius-sm); margin-bottom: 1rem;
+      background: rgba(255,107,122,0.1); border: 1px solid rgba(255,107,122,0.3); color: #ffc8cf;
+      font-size: 0.88rem; animation: rise 0.3s ease both;
+    }
+    .empty {
+      text-align: center; padding: 3.5rem 1.5rem;
+      background: var(--surface); border: 1px dashed var(--border); border-radius: var(--radius);
+      grid-column: 1 / -1;
+    }
+    .empty-icon {
+      width: 72px; height: 72px; margin: 0 auto 1rem; border-radius: 50%;
+      background: var(--accent-soft); display: grid; place-items: center; font-size: 2rem;
+    }
+    .table-wrap {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden;
+    }
+    .table-scroll { max-height: 520px; overflow: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th {
+      text-align: left; padding: 0.8rem 1rem; color: var(--muted);
+      font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em;
+      background: rgba(0,0,0,0.3); position: sticky; top: 0;
+    }
+    td { padding: 0.72rem 1rem; border-top: 1px solid var(--border); }
+    tbody tr:hover { background: rgba(255,255,255,0.025); }
+    .session-layout { display: grid; gap: 1rem; }
+    @media (min-width: 960px) { .session-layout { grid-template-columns: 1.2fr 1fr; } }
+    .card-panel {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.25rem;
+    }
+    .card-panel h3 { font-size: 0.95rem; margin-bottom: 0.35rem; }
+    .card-panel .sub { color: var(--muted); font-size: 0.8rem; margin-bottom: 0.85rem; line-height: 1.45; }
+    .storage-box {
+      margin-top: 1rem; padding: 0.85rem 1rem; border-radius: var(--radius-sm);
+      background: rgba(0,0,0,0.28); border: 1px solid var(--border);
+      font-size: 0.74rem; color: var(--muted); line-height: 1.6;
+    }
+    .storage-box code {
+      display: block; font-family: "JetBrains Mono", monospace; font-size: 0.68rem;
+      color: #a5b4fc; word-break: break-all; margin-top: 0.35rem;
+    }
+    .storage-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; margin-top: 0.65rem; }
+    .storage-stat {
+      padding: 0.5rem 0.65rem; border-radius: 8px; background: rgba(255,255,255,0.03);
+      font-size: 0.72rem;
+    }
+    .storage-stat span { display: block; color: var(--text); font-weight: 600; margin-top: 0.15rem; }
+    .retry-grid { display: grid; gap: 0.5rem; margin-top: 0.75rem; }
+    .retry-row {
+      display: flex; justify-content: space-between; padding: 0.65rem 0.85rem;
+      border-radius: var(--radius-sm); background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+      font-size: 0.85rem;
+    }
+    .retry-row span:last-child { font-family: "JetBrains Mono", monospace; color: var(--accent); }
+    .log-dock {
+      flex-shrink: 0;
+      border-top: 1px solid var(--border);
+      background: rgba(4, 6, 12, 0.96);
+      backdrop-filter: blur(16px);
+    }
+    .log-dock-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.45rem 1rem 0.35rem;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .log-box {
+      height: 170px;
+      overflow-y: auto;
+      background: rgba(0,0,0,0.35);
+      padding: 0.55rem 1rem 0.75rem;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.72rem;
+      line-height: 1.55;
+    }
+    .log-line { padding: 0.1rem 0 0.1rem 0.55rem; border-left: 2px solid transparent; animation: rise 0.2s ease both; }
+    .log-line.info { color: #c4d0ef; border-color: rgba(91, 140, 255, 0.45); }
+    .log-line.success { color: var(--ok); border-color: var(--ok); }
+    .log-line.warn { color: var(--warn); border-color: var(--warn); }
+    .log-line.error { color: var(--err); border-color: var(--err); }
+    .toasts {
+      position: fixed; bottom: 190px; right: 1.25rem; z-index: 200;
+      display: flex; flex-direction: column; gap: 0.5rem;
+    }
+    .toast {
+      padding: 0.8rem 1.1rem; border-radius: var(--radius-sm);
+      background: var(--surface-2); border: 1px solid var(--border-hover);
+      box-shadow: var(--shadow); font-size: 0.85rem; max-width: 340px;
+      animation: rise 0.35s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+    }
+    .toast.success { border-color: rgba(45,212,168,0.4); }
+    .toast.error { border-color: rgba(255,107,122,0.4); }
+    .active-rail {
+      border-left: 1px solid var(--border);
+      background: var(--sidebar);
+      backdrop-filter: blur(20px);
+      padding: 1.25rem 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+    }
+    .active-rail-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 0 0.15rem;
+    }
+    .active-rail-head h3 {
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--muted);
+    }
+    .active-count {
+      min-width: 1.5rem;
+      height: 1.5rem;
+      padding: 0 0.4rem;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      border: 1px solid rgba(91, 140, 255, 0.25);
+      color: var(--accent);
+      font-size: 0.72rem;
+      font-weight: 700;
+      display: grid;
+      place-items: center;
+    }
+    .active-count.live {
+      background: rgba(245, 185, 66, 0.12);
+      border-color: rgba(245, 185, 66, 0.35);
+      color: var(--warn);
+      animation: pulse 2s infinite;
+    }
+    .active-list { display: flex; flex-direction: column; gap: 0.65rem; flex: 1; }
+    .active-empty {
+      padding: 1.25rem 0.75rem;
+      border-radius: var(--radius-sm);
+      border: 1px dashed var(--border);
+      color: var(--muted);
+      font-size: 0.8rem;
+      text-align: center;
+      line-height: 1.5;
+    }
+    .active-item {
+      padding: 0.9rem 0.85rem;
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      animation: rise 0.25s ease both;
+    }
+    .active-item.running { border-color: rgba(245, 185, 66, 0.35); background: rgba(245, 185, 66, 0.04); }
+    .active-item.ok { border-color: rgba(45, 212, 168, 0.35); background: rgba(45, 212, 168, 0.04); }
+    .active-item-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin-bottom: 0.45rem;
+    }
+    .active-item-label { font-size: 0.86rem; font-weight: 600; line-height: 1.3; }
+    .active-item-amt {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.78rem;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+    .active-item-status {
+      font-size: 0.76rem;
+      color: var(--text);
+      line-height: 1.45;
+      word-break: break-word;
+    }
+    .active-item-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin-top: 0.55rem;
+      font-size: 0.68rem;
+      color: var(--muted);
+      font-family: "JetBrains Mono", monospace;
+    }
+    .active-item .btn {
+      padding: 0.35rem 0.65rem;
+      font-size: 0.72rem;
+      margin-top: 0.55rem;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div class="ambient"></div>
+  <div class="grid-noise"></div>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">S</div>
+        <div>
+          <h1>SolvoCard</h1>
+          <p>Topup panel</p>
+        </div>
+      </div>
+      <nav class="nav" role="tablist">
+        <button class="nav-btn active" data-tab="overview" onclick="switchTab('overview')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          Overview
+        </button>
+        <button class="nav-btn" data-tab="transactions" onclick="switchTab('transactions')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+          Transactions
+        </button>
+        <button class="nav-btn" data-tab="session" onclick="switchTab('session')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a5 5 0 0 0-5 5v2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-2V7a5 5 0 0 0-5-5z"/></svg>
+          Session
+        </button>
+        <button class="nav-btn" data-tab="settings" onclick="switchTab('settings')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+          Retry
+        </button>
+      </nav>
+      <div class="sidebar-foot" id="sidebarStorage">
+        <strong>Local storage</strong>
+        Saved on this machine only
+      </div>
+    </aside>
+
+    <div class="content-col">
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h2 id="pageTitle">Overview</h2>
+          <p id="pageSub">Cards, balances, and topup controls</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">
+          <div id="statusPill" class="status-chip offline"><span class="dot"></span><span id="statusText">Not connected</span></div>
+          <div class="actions">
+            <button class="btn btn-ghost" id="refreshBtn" onclick="refreshDashboard(true)"><span class="spin"></span>Refresh</button>
+            <button class="btn" onclick="startAll()">Start all</button>
+            <button class="btn btn-danger" onclick="stopAll()">Stop all</button>
+          </div>
+        </div>
+      </header>
+
+      <section id="panel-overview" class="panel active">
+        <div id="loadAlert"></div>
+        <div class="kpis" id="statsRow"></div>
+        <div id="cards" class="cards-grid"></div>
+      </section>
+
+      <section id="panel-transactions" class="panel">
+        <div class="table-wrap"><div class="table-scroll">
+          <table>
+            <thead><tr><th>Date</th><th>Card</th><th>Merchant</th><th>Amount</th><th>Status</th><th>Type</th></tr></thead>
+            <tbody id="txBody"></tbody>
+          </table>
+        </div></div>
+      </section>
+
+      <section id="panel-session" class="panel">
+        <div class="session-layout">
+          <div class="card-panel">
+            <h3>Connect session</h3>
+            <p class="sub">Paste a curl from DevTools or raw cookie JSON. Connect saves to disk and reloads cards.</p>
+            <textarea id="curl" placeholder="curl 'https://www.solvocard.com/...' -H 'cookie: ...'&#10;&#10;or cookie JSON"></textarea>
+            <div style="display:flex;gap:0.5rem;margin-top:0.65rem;flex-wrap:wrap">
+              <button class="btn" onclick="parseCurl()">Parse only</button>
+              <button class="btn btn-primary" onclick="connectSession()">Connect session</button>
+            </div>
+          </div>
+          <div class="card-panel">
+            <h3>Cookie JSON</h3>
+            <p class="sub">Editable copy of your saved session.</p>
+            <textarea id="cookies" placeholder='{"sb-...-auth-token": "base64-..."}'></textarea>
+            <div style="display:flex;gap:0.5rem;margin-top:0.65rem;flex-wrap:wrap">
+              <button class="btn btn-primary" onclick="connectSession()">Connect session</button>
+              <button class="btn btn-danger" onclick="clearCookies()">Clear session</button>
+            </div>
+            <div class="storage-box" id="storageDetail"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="panel-settings" class="panel">
+        <div class="card-panel" style="max-width:520px">
+          <h3>Automatic retry</h3>
+          <p class="sub">Pacing is tuned from API rate limits and backs off on errors. Topups keep going until they succeed.</p>
+          <div class="retry-grid" id="retryReadout"></div>
+        </div>
+      </section>
+    </main>
+
+    <div class="log-dock">
+      <div class="log-dock-head"><span>Live log</span><span id="logCount"></span></div>
+      <div class="log-box" id="log"></div>
+    </div>
+    </div>
+
+    <aside class="active-rail" id="activeRail">
+      <div class="active-rail-head">
+        <h3>Active topups</h3>
+        <span class="active-count" id="activeCount">0</span>
+      </div>
+      <div class="active-list" id="activeTopups">
+        <div class="active-empty">No topups running</div>
+      </div>
+    </aside>
+  </div>
+  <div class="toasts" id="toasts"></div>
+
+  <script>
+    let dash = {};
+    const titles = {
+      overview: ['Overview', 'Cards, balances, and topup controls'],
+      transactions: ['Transactions', 'Recent activity across all cards'],
+      session: ['Session', 'Connect and manage saved cookies'],
+      settings: ['Retry', 'Automatic pacing from the API'],
+    };
+
+    function esc(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    function fmtMoney(c) { return '$' + (Number(c) / 100).toFixed(2); }
+    function amountInputValue(cents) { return (Number(cents) / 100).toFixed(2); }
+    function readAmountCents(id) {
+      const dollars = Number(document.getElementById('amt-' + id).value);
+      return Math.max(1, Math.round(dollars * 100));
+    }
+    function fmtTime(ts) {
+      if (!ts) return '—';
+      return new Date(ts * 1000).toLocaleString();
+    }
+
+    function toast(msg, type = 'info') {
+      const el = document.createElement('div');
+      el.className = 'toast ' + type;
+      el.textContent = msg;
+      document.getElementById('toasts').appendChild(el);
+      setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateY(8px)'; setTimeout(() => el.remove(), 280); }, 3200);
+    }
+
+    function switchTab(name) {
+      document.querySelectorAll('.nav-btn').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+      document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
+      const [title, sub] = titles[name] || ['SolvoCard', ''];
+      document.getElementById('pageTitle').textContent = title;
+      document.getElementById('pageSub').textContent = sub;
+    }
+
+    async function api(path, opts = {}) {
+      const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+      const data = await res.json();
+      if (!res.ok && data.error) throw new Error(data.error);
+      return data;
+    }
+
+    function renderStorage(s) {
+      if (!s) return;
+      document.getElementById('sidebarStorage').innerHTML = `
+        <strong>Local storage</strong>
+        ${s.cookie_count ? s.cookie_count + ' cookie(s)' : 'No session'} · ${s.topup_amount_count || 0} saved amount(s)
+      `;
+      document.getElementById('storageDetail').innerHTML = `
+        <strong style="color:var(--text)">Everything is saved locally</strong>
+        Session cookies, topup amounts per card, and retry settings persist between restarts.
+        <div class="storage-grid">
+          <div class="storage-stat">Cookies<span>${s.cookie_count || 0}</span></div>
+          <div class="storage-stat">Topup amounts<span>${s.topup_amount_count || 0}</span></div>
+          <div class="storage-stat">Connected<span>${fmtTime(s.connected_at)}</span></div>
+          <div class="storage-stat">Last saved<span>${fmtTime(s.updated_at)}</span></div>
+        </div>
+        Settings file<code>${esc(s.state_path)}</code>
+        Activity log<code>${esc(s.log_path)}</code>
+      `;
+    }
+
+    function captureAmountInputs() {
+      const values = {};
+      document.querySelectorAll('[id^="amt-"]').forEach(el => {
+        values[el.id.slice(4)] = el.value;
+      });
+      return values;
+    }
+
+    function applyDashboard(data, opts = {}) {
+      dash = data;
+      setStatus(dash);
+      renderLoadAlert(dash);
+      renderStats(dash);
+      renderCards(dash.cards || [], opts);
+      renderActiveTopups(dash.cards || []);
+      renderTransactions(dash.transactions || []);
+      renderStorage(dash.storage);
+      const cookies = dash.cookies || {};
+      if (Object.keys(cookies).length) {
+        document.getElementById('cookies').value = JSON.stringify(cookies, null, 2);
+      }
+      renderRetryReadout((dash.panel && dash.panel.retry) || {});
+    }
+
+    function mergeWorkers(workers) {
+      if (!dash.cards) return;
+      const map = Object.fromEntries((workers || []).map(w => [w.card_id, w]));
+      dash.cards = dash.cards.map(card => {
+        const w = map[card.id];
+        return w ? { ...card, worker: w } : card;
+      });
+      patchCards(dash.cards);
+      renderStats(dash);
+      renderActiveTopups(dash.cards);
+    }
+
+    async function refreshWorkers() {
+      try {
+        const data = await api('/api/workers');
+        mergeWorkers(data.workers || []);
+      } catch (_) {}
+    }
+
+    function renderLoadAlert(data) {
+      const root = document.getElementById('loadAlert');
+      root.innerHTML = (data.load_error && !(data.auth_ok && data.card_count > 0))
+        ? `<div class="alert">${esc(data.load_error)}</div>` : '';
+    }
+
+    function renderRetryReadout(r) {
+      document.getElementById('retryReadout').innerHTML = `
+        <div class="retry-row"><span>Start interval</span><span>${r.interval_seconds ?? 3}s</span></div>
+        <div class="retry-row"><span>Max interval</span><span>${r.max_interval_seconds ?? 45}s</span></div>
+        <div class="retry-row"><span>Backoff</span><span>×${r.backoff_multiplier ?? 1.4}</span></div>
+        <div class="retry-row"><span>Jitter</span><span>0–${r.jitter_seconds ?? 0.75}s</span></div>
+        <div class="retry-row"><span>Mode</span><span>${r.auto === false ? 'manual' : 'automatic'}</span></div>
+      `;
+    }
+
+    function setStatus(data) {
+      const pill = document.getElementById('statusPill');
+      const text = document.getElementById('statusText');
+      pill.className = 'status-chip';
+      if (data.auth_ok && data.card_count > 0) {
+        pill.classList.add('online');
+        text.textContent = `${data.card_count} card(s) connected`;
+      } else if (data.has_cookies) {
+        pill.classList.add('pending');
+        text.textContent = data.load_error ? 'Session saved · load failed' : 'Session saved';
+      } else {
+        pill.classList.add('offline');
+        text.textContent = 'No session';
+      }
+    }
+
+    function renderStats(data) {
+      const cards = data.cards || [];
+      const txs = data.transactions || [];
+      const running = cards.filter(c => c.worker?.running).length;
+      const totalBal = cards.reduce((s, c) => s + (c.balance_cents || 0), 0);
+      document.getElementById('statsRow').innerHTML = `
+        <div class="kpi"><div class="kpi-label">Cards</div><div class="kpi-value">${cards.length}</div></div>
+        <div class="kpi"><div class="kpi-label">Total balance</div><div class="kpi-value">${cards.length ? fmtMoney(totalBal) : '—'}</div></div>
+        <div class="kpi"><div class="kpi-label">Transactions</div><div class="kpi-value">${txs.length}</div></div>
+        <div class="kpi"><div class="kpi-label">Active topups</div><div class="kpi-value">${running}</div></div>
+      `;
+    }
+
+    function ccClass(card) {
+      const w = card.worker || {};
+      if (w.succeeded) return 'success';
+      if (w.running) return 'running';
+      return '';
+    }
+
+    function badgeHtml(card) {
+      const w = card.worker || {};
+      if (w.succeeded) return '<span class="badge ok">Done</span>';
+      if (w.running) return '<span class="badge run">Retrying</span>';
+      if (card.is_lowest_balance) return '<span class="badge low">Lowest</span>';
+      return '<span class="badge">Idle</span>';
+    }
+
+    function cardBalance(card) {
+      return card.balance_display || (card.balance_cents != null ? fmtMoney(card.balance_cents) : '—');
+    }
+
+    function workerStatusText(w) {
+      if (w.succeeded) return 'Topup succeeded';
+      if (!w.running) return w.last_message || 'Stopped';
+      if (w.last_message) return w.last_message;
+      if (w.last_status) return `Waiting after HTTP ${w.last_status}`;
+      return w.attempts ? `Attempt ${w.attempts} in progress` : 'Starting…';
+    }
+
+    function renderActiveTopups(cards) {
+      const root = document.getElementById('activeTopups');
+      const countEl = document.getElementById('activeCount');
+      if (!root) return;
+
+      const active = (cards || [])
+        .filter(c => c.worker && (c.worker.running || c.worker.succeeded))
+        .sort((a, b) => Number(b.worker?.running) - Number(a.worker?.running) || (b.worker?.attempts || 0) - (a.worker?.attempts || 0));
+
+      const runningCount = active.filter(c => c.worker?.running).length;
+      if (countEl) {
+        countEl.textContent = String(runningCount);
+        countEl.classList.toggle('live', runningCount > 0);
+      }
+
+      if (!active.length) {
+        root.innerHTML = '<div class="active-empty">No topups running</div>';
+        return;
+      }
+
+      root.innerHTML = active.map(card => {
+        const w = card.worker || {};
+        const itemClass = w.running ? 'running' : (w.succeeded ? 'ok' : '');
+        const badge = w.running
+          ? '<span class="badge run">Retrying</span>'
+          : (w.succeeded ? '<span class="badge ok">Done</span>' : '<span class="badge">Idle</span>');
+        const amount = w.amount_cents ?? card.amount_cents ?? card.suggested_amount_cents ?? 0;
+        return `<article class="active-item ${itemClass}">
+          <div class="active-item-top">
+            <div class="active-item-label">${esc(card.label || w.label || card.id.slice(0, 8))}</div>
+            ${badge}
+          </div>
+          <div class="active-item-amt">${esc(fmtMoney(amount))}</div>
+          <div class="active-item-status">${esc(workerStatusText(w))}</div>
+          <div class="active-item-meta">
+            <span>Attempt ${w.attempts || 0}</span>
+            <span>${w.last_status ? 'HTTP ' + w.last_status : '—'}</span>
+          </div>
+          ${w.running ? `<button class="btn btn-danger" onclick="stopCard('${card.id}')">Stop</button>` : ''}
+        </article>`;
+      }).join('');
+    }
+
+    function patchCards(cards) {
+      cards.forEach(card => {
+        const el = document.querySelector(`.cc[data-card-id="${card.id}"]`);
+        if (!el) return;
+        const w = card.worker || {};
+        el.className = `cc ${ccClass(card)}`;
+        const balEl = el.querySelector('[data-field="balance"]');
+        if (balEl) balEl.textContent = cardBalance(card);
+        const labelEl = el.querySelector('.cc-label');
+        if (labelEl) labelEl.textContent = card.label || '';
+        const badgeEl = el.querySelector('[data-field="badge"]');
+        if (badgeEl) badgeEl.innerHTML = badgeHtml(card);
+        const triesEl = el.querySelector('[data-field="tries"]');
+        if (triesEl) triesEl.textContent = String(w.attempts || 0);
+        const topupBtn = el.querySelector('[data-action="topup"]');
+        if (topupBtn) topupBtn.disabled = !!w.running;
+        const stopBtn = el.querySelector('[data-action="stop"]');
+        if (stopBtn) stopBtn.disabled = !w.running;
+        const noteEl = el.querySelector('[data-field="note"]');
+        if (noteEl) {
+          noteEl.textContent = w.last_message || '';
+          noteEl.style.display = w.last_message ? '' : 'none';
+        }
+      });
+    }
+
+    function renderCards(cards, opts = {}) {
+      const root = document.getElementById('cards');
+      if (!cards.length) {
+        root.innerHTML = `<div class="empty">
+          <div class="empty-icon">💳</div>
+          <h3>No cards yet</h3>
+          <p style="color:var(--muted);max-width:360px;margin:0.5rem auto 1.25rem">Connect your session to load cards. Everything saves locally to panel_state.json.</p>
+          <button class="btn btn-primary" onclick="switchTab('session')">Connect session</button>
+        </div>`;
+        return;
+      }
+
+      const existing = [...root.querySelectorAll('.cc[data-card-id]')].map(el => el.dataset.cardId);
+      const incoming = cards.map(c => c.id);
+      const canPatch = !opts.forceFull
+        && incoming.length === existing.length
+        && incoming.every(id => existing.includes(id));
+
+      if (canPatch) {
+        dash.cards = cards;
+        patchCards(cards);
+        renderActiveTopups(cards);
+        return;
+      }
+
+      const preserved = { ...captureAmountInputs(), ...(opts.preserved || {}) };
+      root.innerHTML = cards.map((card, i) => {
+        const w = card.worker || {};
+        const suggested = card.suggested_amount_cents ?? 500;
+        const last4 = card.last4 ? '•••• ' + card.last4 : card.id.slice(0, 8);
+        const amountValue = preserved[card.id] ?? amountInputValue(card.amount_cents ?? suggested);
+        return `<article class="cc ${ccClass(card)}" data-card-id="${card.id}" style="animation-delay:${i * 0.05}s">
+          <div class="cc-face">
+            <div class="cc-top"><div class="chip"></div><span data-field="badge">${badgeHtml(card)}</span></div>
+            <div class="cc-balance" data-field="balance">${esc(cardBalance(card))}</div>
+            <div class="cc-label">${esc(card.label)}</div>
+            <div class="cc-num">${esc(last4)}</div>
+          </div>
+          <div class="cc-body">
+            <div class="meta">
+              <span>Status <b>${esc(card.status || '—')}</b></span>
+              <span>Brand <b>${esc(card.type || '—')}</b></span>
+              <span>Tx <b>${card.transaction_count ?? 0}</b></span>
+              <span>Tries <b data-field="tries">${w.attempts || 0}</b></span>
+            </div>
+            <div class="topup-row">
+              <label>Topup $</label>
+              <input type="number" id="amt-${card.id}" min="0.01" step="0.01" value="${amountValue}" />
+            </div>
+            <div class="cc-actions">
+              <button class="btn btn-primary" data-action="topup" onclick="startCard('${card.id}')" ${w.running ? 'disabled' : ''}>Add a topup</button>
+              <button class="btn" data-action="stop" onclick="stopCard('${card.id}')" ${!w.running ? 'disabled' : ''}>Stop</button>
+            </div>
+            <div class="note" data-field="note" ${w.last_message ? '' : 'style="display:none"'}>${esc(w.last_message || '')}</div>
+          </div>
+        </article>`;
+      }).join('');
+    }
+
+    function renderTransactions(txs) {
+      const body = document.getElementById('txBody');
+      body.innerHTML = txs.length ? txs.map(tx => `<tr>
+        <td>${esc(tx.date_display || tx.date || '—')}</td>
+        <td>${esc(tx.card_label || '—')}</td>
+        <td>${esc(typeof tx.merchant === 'string' ? tx.merchant : '—')}</td>
+        <td>${esc(tx.amount_display || '—')}</td>
+        <td>${esc(tx.status || '—')}</td>
+        <td>${esc(tx.type || '—')}</td>
+      </tr>`).join('') : '<tr><td colspan="6" style="color:var(--muted);text-align:center;padding:2.5rem">No transactions loaded</td></tr>';
+    }
+
+    async function refreshDashboard(force) {
+      const btn = document.getElementById('refreshBtn');
+      btn.classList.add('loading');
+      try {
+        const data = await api('/api/dashboard' + (force ? '?force=1' : ''));
+        const preserved = captureAmountInputs();
+        applyDashboard(data, { preserved, forceFull: force });
+      } catch (e) {
+        toast(String(e.message || e), 'error');
+      } finally {
+        btn.classList.remove('loading');
+      }
+    }
+
+    async function refreshDashboardSoft() {
+      try {
+        const data = await api('/api/dashboard');
+        dash = { ...dash, ...data, cards: data.cards || dash.cards || [] };
+        setStatus(dash);
+        renderStats(dash);
+        renderCards(dash.cards || []);
+        renderActiveTopups(dash.cards || []);
+        renderTransactions(dash.transactions || []);
+      } catch (_) {}
+    }
+
+    async function startCard(id) {
+      const card = (dash.cards || []).find(c => c.id === id);
+      const w = card?.worker || {};
+      const cents = readAmountCents(id);
+      await api('/api/cards/' + id + '/amount', { method: 'POST', body: JSON.stringify({ amount_cents: cents }) });
+      const res = await api('/api/start/' + id, { method: 'POST', body: JSON.stringify({ force: !!w.succeeded }) });
+      mergeWorkers(res.workers || []);
+      toast('Topup started', 'success');
+    }
+
+    async function stopCard(id) {
+      const res = await api('/api/stop/' + id, { method: 'POST' });
+      mergeWorkers(res.workers || []);
+      toast('Topup stopped');
+    }
+
+    async function startAll() {
+      const res = await api('/api/start-all', { method: 'POST' });
+      mergeWorkers(res.workers || []);
+      toast('All topups started', 'success');
+    }
+
+    async function stopAll() {
+      const res = await api('/api/stop-all', { method: 'POST' });
+      mergeWorkers(res.workers || []);
+      toast('All topups stopped');
+    }
+
+    async function parseCurl() {
+      const curl = document.getElementById('curl').value.trim();
+      if (!curl) return toast('Paste curl or cookie JSON first', 'error');
+      if (curl.startsWith('{')) {
+        document.getElementById('cookies').value = curl;
+        toast('Cookie JSON ready — click Connect', 'success');
+        return;
+      }
+      const data = await api('/api/import-curl', { method: 'POST', body: JSON.stringify({ curl }) });
+      document.getElementById('cookies').value = JSON.stringify(data.cookies, null, 2);
+      toast(`Parsed ${data.count} cookie(s)`, 'success');
+    }
+
+    async function connectSession() {
+      const curl = document.getElementById('curl').value.trim();
+      const cookiesRaw = document.getElementById('cookies').value.trim();
+      try {
+        let body;
+        if (curl.startsWith('{')) body = { cookies: JSON.parse(curl) };
+        else if (curl) body = { curl };
+        else if (cookiesRaw) body = { cookies: JSON.parse(cookiesRaw) };
+        else return toast('Paste curl or cookie JSON first', 'error');
+        const data = await api('/api/config/cookies', { method: 'POST', body: JSON.stringify(body) });
+        applyDashboard(data, { forceFull: true });
+        toast(`Connected — ${data.card_count || 0} card(s) saved locally`, data.card_count ? 'success' : 'error');
+        if (data.card_count) switchTab('overview');
+      } catch (e) {
+        toast(String(e.message || e), 'error');
+      }
+    }
+
+    async function clearCookies() {
+      await api('/api/config/cookies/clear', { method: 'POST' });
+      document.getElementById('cookies').value = '';
+      document.getElementById('curl').value = '';
+      toast('Session cleared from disk');
+      refreshDashboard(true);
+    }
+
+    function appendLog(entry, scroll = true) {
+      if (entry.message === 'heartbeat') return;
+      const log = document.getElementById('log');
+      const line = document.createElement('div');
+      line.className = 'log-line ' + (entry.level || 'info');
+      line.textContent = `[${new Date((entry.ts || Date.now() / 1000) * 1000).toLocaleTimeString()}] ${entry.message}`;
+      log.appendChild(line);
+      if (scroll) log.scrollTop = log.scrollHeight;
+      while (log.children.length > 300) log.removeChild(log.firstChild);
+      const countEl = document.getElementById('logCount');
+      if (countEl) countEl.textContent = log.children.length + ' lines';
+    }
+
+    async function loadPersistedLogs() {
+      try {
+        const data = await api('/api/logs');
+        const log = document.getElementById('log');
+        log.innerHTML = '';
+        (data.logs || []).forEach(entry => appendLog(entry, false));
+        log.scrollTop = log.scrollHeight;
+        const countEl = document.getElementById('logCount');
+        if (countEl) countEl.textContent = log.children.length + ' lines';
+      } catch (_) {}
+    }
+
+    const source = new EventSource('/api/events');
+    source.onmessage = (ev) => {
+      const entry = JSON.parse(ev.data);
+      appendLog(entry);
+      if (['success', 'warn', 'error'].includes(entry.level)) {
+        refreshWorkers();
+        if (entry.level === 'success') refreshDashboardSoft();
+      }
+    };
+
+    loadPersistedLogs();
+    refreshDashboard(true);
+    setInterval(refreshWorkers, 2000);
+    setInterval(refreshDashboardSoft, 30000);
+  </script>
+</body>
+</html>
