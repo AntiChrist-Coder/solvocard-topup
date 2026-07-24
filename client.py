@@ -116,10 +116,16 @@ def _parse_rate_limit(headers: dict[str, str]) -> RateLimitInfo:
         val = lower.get(key)
         if val is None:
             return None
+        val = str(val).strip()
+        if val.lower() in ("nan", "null", "undefined", "none", ""):
+            return None
         try:
-            return int(float(val))
+            num = float(val)
         except ValueError:
             return None
+        if num != num or num < 0:
+            return None
+        return int(num)
 
     return RateLimitInfo(
         limit=as_int("x-ratelimit-limit"),
@@ -127,6 +133,44 @@ def _parse_rate_limit(headers: dict[str, str]) -> RateLimitInfo:
         reset_seconds=as_int("x-ratelimit-reset"),
         retry_after=as_int("retry-after"),
     )
+
+
+def _positive_seconds(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    if num != num or num <= 0:
+        return None
+    return num
+
+
+def rate_limit_wait_seconds(response: ApiResponse) -> float | None:
+    rl = response.rate_limit
+    for candidate in (rl.retry_after, rl.reset_seconds):
+        seconds = _positive_seconds(candidate)
+        if seconds is None:
+            continue
+        if seconds > 1_000_000_000:
+            seconds = max(0.0, seconds - time.time())
+        if seconds > 0:
+            return seconds
+
+    data = response.data
+    if isinstance(data, dict):
+        for key in ("retryAfter", "retry_after", "waitSeconds", "wait_seconds", "retryIn", "retry_in", "cooldown"):
+            seconds = _positive_seconds(data.get(key))
+            if seconds is not None:
+                return seconds
+        err = data.get("error")
+        if isinstance(err, dict):
+            for key in ("retryAfter", "retry_after", "waitSeconds", "wait_seconds"):
+                seconds = _positive_seconds(err.get(key))
+                if seconds is not None:
+                    return seconds
+    return None
 
 
 def _money_to_cents(value: Any) -> int | None:
