@@ -68,10 +68,11 @@ Cookies are saved locally to `panel_state.json` and reused on the next run.
 
 SolvoCard topups only work during a short window. Manually you’d hammer the button until one goes through — but hit the API too fast and you get rate-limited. This tool mimics that:
 
+- **Ramps up amounts**: tries **$100**, then **$250**, then $250 chunks until your target is reached (e.g. $25 target = one $25 try; $2500 = $100 → $250 → …)
 - **Retries every ~2–5 seconds** while the window is closed (HTTP 500 “unable to process”)
 - **Brief 8–15s pause** only on HTTP 429 (too many requests), then keeps trying
 - **One request at a time** across all cards so you don’t burn the rate limit instantly
-- **Stops on success** or if the session expires (401/403)
+- **Stops when the full target amount has topped up** or if the session expires (401/403)
 
 - Enter the amount in **dollars** (e.g. `25.00` for a $25 topup).
 - **Add a topup** saves the amount and starts retrying until the topup succeeds.

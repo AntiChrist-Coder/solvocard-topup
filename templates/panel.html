@@ -760,17 +760,22 @@
         const w = card.worker || {};
         const itemClass = w.running ? 'running' : (w.succeeded ? 'ok' : '');
         const badge = workerBadge(w);
-        const amount = w.amount_cents ?? card.amount_cents ?? card.suggested_amount_cents ?? 0;
+        const tryCents = w.current_try_cents ?? w.amount_cents ?? card.amount_cents ?? card.suggested_amount_cents ?? 0;
+        const targetCents = w.target_amount_cents ?? w.amount_cents ?? card.amount_cents ?? tryCents;
+        const toppedUp = w.topped_up_cents || 0;
+        const stepLabel = w.plan_total > 1
+          ? `Step ${(w.plan_index ?? 0) + 1}/${w.plan_total} · ${esc(fmtMoney(tryCents))} now`
+          : esc(fmtMoney(tryCents));
         return `<article class="active-item ${itemClass}">
           <div class="active-item-top">
             <div class="active-item-label">${esc(card.label || w.label || card.id.slice(0, 8))}</div>
             ${badge}
           </div>
-          <div class="active-item-amt">${esc(fmtMoney(amount))}</div>
+          <div class="active-item-amt">${esc(fmtMoney(targetCents))} target · ${esc(fmtMoney(toppedUp))} done</div>
           <div class="active-item-status">${esc(workerStatusText(w))}</div>
           <div class="active-item-meta">
+            <span>${stepLabel}</span>
             <span>Attempt ${w.attempts || 0}</span>
-            <span>${w.last_status ? 'HTTP ' + w.last_status : '—'}</span>
           </div>
           ${w.running ? `<button class="btn btn-danger" onclick="stopCard('${card.id}')">Stop</button>` : ''}
         </article>`;

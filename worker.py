@@ -46,12 +46,48 @@ class SharedRateLimit:
 
 AUTH_FAILURE_CODES = frozenset({401, 403})
 
+RAMP_100_CENTS = 10_000
+RAMP_250_CENTS = 25_000
+
+
+def build_topup_plan(target_cents: int) -> list[int]:
+    if target_cents <= 0:
+        return []
+    if target_cents <= RAMP_100_CENTS:
+        return [target_cents]
+
+    chunks = [RAMP_100_CENTS]
+    remaining = target_cents - RAMP_100_CENTS
+
+    if remaining <= RAMP_250_CENTS:
+        chunks.append(remaining)
+        return chunks
+
+    chunks.append(RAMP_250_CENTS)
+    remaining -= RAMP_250_CENTS
+
+    while remaining >= RAMP_250_CENTS:
+        chunks.append(RAMP_250_CENTS)
+        remaining -= RAMP_250_CENTS
+
+    if remaining >= RAMP_100_CENTS:
+        chunks.append(RAMP_100_CENTS)
+        remaining -= RAMP_100_CENTS
+
+    if remaining > 0:
+        chunks.append(remaining)
+
+    return chunks
+
 
 @dataclass
 class WorkerState:
     card_id: str
     label: str
     amount_cents: int
+    topped_up_cents: int = 0
+    plan: list[int] = field(default_factory=list)
+    plan_index: int = 0
     running: bool = False
     attempts: int = 0
     last_status: int | None = None
@@ -60,6 +96,12 @@ class WorkerState:
     succeeded: bool = False
     stop_event: threading.Event = field(default_factory=threading.Event)
     thread: threading.Thread | None = None
+
+    @property
+    def current_try_cents(self) -> int:
+        if self.plan and self.plan_index < len(self.plan):
+            return self.plan[self.plan_index]
+        return self.amount_cents
 
 
 def _wait_seconds(response: ApiResponse, settings: RetrySettings, attempt_interval: float) -> float:
@@ -179,21 +221,29 @@ class TopupManager:
     def snapshot(self) -> list[dict]:
         rate_wait = round(self._rate_limit_remaining(), 1)
         with self._lock:
-            return [
-                {
-                    "card_id": w.card_id,
-                    "label": w.label,
-                    "amount_cents": w.amount_cents,
-                    "running": w.running,
-                    "attempts": w.attempts,
-                    "last_status": w.last_status,
-                    "last_message": w.last_message,
-                    "last_idempotency_key": w.last_idempotency_key,
-                    "succeeded": w.succeeded,
-                    "rate_limit_wait": rate_wait if rate_wait > 0 else 0,
-                }
-                for w in self.workers.values()
-            ]
+            rows = []
+            for w in self.workers.values():
+                try_cents = w.current_try_cents
+                rows.append(
+                    {
+                        "card_id": w.card_id,
+                        "label": w.label,
+                        "amount_cents": w.amount_cents,
+                        "target_amount_cents": w.amount_cents,
+                        "topped_up_cents": w.topped_up_cents,
+                        "current_try_cents": try_cents,
+                        "plan_total": len(w.plan),
+                        "plan_index": w.plan_index,
+                        "running": w.running,
+                        "attempts": w.attempts,
+                        "last_status": w.last_status,
+                        "last_message": w.last_message,
+                        "last_idempotency_key": w.last_idempotency_key,
+                        "succeeded": w.succeeded,
+                        "rate_limit_wait": rate_wait if rate_wait > 0 else 0,
+                    }
+                )
+            return rows
 
     def stop(self, card_id: str | None = None) -> None:
         with self._lock:
@@ -221,6 +271,9 @@ class TopupManager:
             worker.stop_event.clear()
             worker.running = True
             worker.succeeded = False
+            worker.topped_up_cents = 0
+            worker.plan_index = 0
+            worker.plan = build_topup_plan(worker.amount_cents)
             worker.thread = threading.Thread(
                 target=self._run_worker,
                 args=(worker,),
@@ -244,8 +297,10 @@ class TopupManager:
     def _run_worker(self, worker: WorkerState) -> None:
         settings = self.retry_settings
         interval = settings.interval_seconds
+        target = worker.amount_cents
+        plan_summary = " → ".join(f"${c / 100:.0f}" for c in worker.plan) if len(worker.plan) > 1 else f"${target / 100:.2f}"
         self._log(
-            f"Started retry loop for {worker.label} (${worker.amount_cents / 100:.2f}) — runs until success",
+            f"Started retry loop for {worker.label} (target ${target / 100:.2f}, plan: {plan_summary})",
             card_id=worker.card_id,
         )
 
@@ -253,11 +308,14 @@ class TopupManager:
             if not self._wait_global_rate_limit(worker):
                 break
 
+            try_cents = worker.current_try_cents
             worker.attempts += 1
             idempotency_key = new_idempotency_key()
             worker.last_idempotency_key = idempotency_key
+            progress = f"${worker.topped_up_cents / 100:.2f}/${target / 100:.2f}"
             self._log(
-                f"[{worker.label}] attempt {worker.attempts}: topup ${worker.amount_cents / 100:.2f} (key={idempotency_key})",
+                f"[{worker.label}] attempt {worker.attempts}: topup ${try_cents / 100:.2f} "
+                f"({progress}, step {worker.plan_index + 1}/{len(worker.plan)}, key={idempotency_key})",
                 card_id=worker.card_id,
                 attempt=worker.attempts,
                 level="info",
@@ -267,7 +325,7 @@ class TopupManager:
                 with self._topup_lock:
                     if not self._wait_global_rate_limit(worker):
                         break
-                    response = self.client.topup(worker.card_id, worker.amount_cents, idempotency_key)
+                    response = self.client.topup(worker.card_id, try_cents, idempotency_key)
             except Exception as exc:
                 worker.last_status = None
                 worker.last_message = str(exc)
@@ -313,16 +371,35 @@ class TopupManager:
 
                 if is_topup_success(response):
                     self._clear_rate_limit_streak()
-                    rl_note = ""
-                    if rl.limit is not None:
-                        rl_note = f" rate={rl.remaining}/{rl.limit}"
-                    self._complete_worker(
-                        worker,
-                        succeeded=True,
-                        message=f"[{worker.label}] topup succeeded on attempt {worker.attempts}{rl_note} — stopped",
+                    worker.topped_up_cents += try_cents
+                    worker.plan_index += 1
+                    if worker.plan_index >= len(worker.plan):
+                        rl_note = ""
+                        if rl.limit is not None:
+                            rl_note = f" rate={rl.remaining}/{rl.limit}"
+                        self._complete_worker(
+                            worker,
+                            succeeded=True,
+                            message=(
+                                f"[{worker.label}] topup complete — ${worker.topped_up_cents / 100:.2f} "
+                                f"on attempt {worker.attempts}{rl_note}"
+                            ),
+                            level="success",
+                        )
+                        return
+
+                    next_cents = worker.current_try_cents
+                    worker.last_message = (
+                        f"Topped up ${try_cents / 100:.2f} — "
+                        f"${worker.topped_up_cents / 100:.2f}/${target / 100:.2f}, next ${next_cents / 100:.2f}"
+                    )
+                    self._log(
+                        f"[{worker.label}] step {worker.plan_index}/{len(worker.plan)} done "
+                        f"(${try_cents / 100:.2f}) — trying ${next_cents / 100:.2f} next",
+                        card_id=worker.card_id,
                         level="success",
                     )
-                    return
+                    continue
 
                 auth_failure = response.status_code in AUTH_FAILURE_CODES
                 self._log(
