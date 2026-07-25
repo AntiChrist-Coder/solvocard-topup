@@ -21,25 +21,27 @@ from panel_state import derive_retry_settings
 
 LogFn = Callable[[str, dict], None]
 
-RATE_LIMIT_INITIAL_COOLDOWN = 60.0
-RATE_LIMIT_MIN_COOLDOWN = 30.0
-RATE_LIMIT_MAX_COOLDOWN = 900.0
-RATE_LIMIT_GROWTH = 1.6
+WINDOW_RETRY_SECONDS = 2.5
+WINDOW_RETRY_MAX = 5.0
+RATE_LIMIT_BACKOFF_INITIAL = 8.0
+RATE_LIMIT_BACKOFF_MAX = 15.0
+RATE_LIMIT_GROWTH = 1.15
 
 
 @dataclass
 class RetrySettings:
-    interval_seconds: float = 3.0
-    max_interval_seconds: float = 45.0
-    backoff_multiplier: float = 1.4
-    jitter_seconds: float = 0.75
+    interval_seconds: float = 2.0
+    max_interval_seconds: float = 6.0
+    backoff_multiplier: float = 1.15
+    jitter_seconds: float = 0.35
 
 
 @dataclass
 class SharedRateLimit:
     blocked_until: float = 0.0
-    cooldown_seconds: float = RATE_LIMIT_INITIAL_COOLDOWN
+    cooldown_seconds: float = WINDOW_RETRY_SECONDS
     consecutive_hits: int = 0
+    last_kind: str = ""
 
 
 AUTH_FAILURE_CODES = frozenset({401, 403})
@@ -96,9 +98,11 @@ class TopupManager:
         while not worker.stop_event.is_set():
             remaining = self._rate_limit_remaining()
             if remaining <= 0:
+                with self._rate_lock:
+                    self.shared_rate_limit.consecutive_hits = 0
                 return True
-            worker.last_message = f"Rate limited — retry in {remaining:.0f}s"
-            if time.time() - last_logged >= 15:
+            worker.last_message = f"Waiting — retry in {remaining:.0f}s"
+            if time.time() - last_logged >= 5:
                 self._log(
                     f"[{worker.label}] rate limit active — resuming in {remaining:.0f}s",
                     card_id=worker.card_id,
@@ -106,27 +110,36 @@ class TopupManager:
                     level="warn",
                 )
                 last_logged = time.time()
-            if worker.stop_event.wait(timeout=min(remaining, 15)):
+            if worker.stop_event.wait(timeout=min(remaining, 5)):
                 return False
         return False
 
     def _register_throttle(self, response: ApiResponse) -> float:
-        wait = rate_limit_wait_seconds(response)
+        header_wait = rate_limit_wait_seconds(response)
         now = time.time()
+        is_429 = response.status_code == 429
+        kind = "rate_limit" if is_429 else "window"
+
         with self._rate_lock:
-            if self.shared_rate_limit.blocked_until > now + 5:
+            if self.shared_rate_limit.blocked_until > now + 1:
                 return self.shared_rate_limit.blocked_until - now
 
-            if wait is None:
-                self.shared_rate_limit.consecutive_hits += 1
+            if kind != self.shared_rate_limit.last_kind:
+                self.shared_rate_limit.consecutive_hits = 0
+            self.shared_rate_limit.last_kind = kind
+            self.shared_rate_limit.consecutive_hits += 1
+            hits = self.shared_rate_limit.consecutive_hits
+
+            if header_wait is not None:
+                cap = RATE_LIMIT_BACKOFF_MAX if is_429 else WINDOW_RETRY_MAX
+                wait = min(header_wait, cap)
+            elif is_429:
                 wait = min(
-                    RATE_LIMIT_MAX_COOLDOWN,
-                    RATE_LIMIT_INITIAL_COOLDOWN
-                    * (RATE_LIMIT_GROWTH ** max(0, self.shared_rate_limit.consecutive_hits - 1)),
+                    RATE_LIMIT_BACKOFF_MAX,
+                    RATE_LIMIT_BACKOFF_INITIAL * (RATE_LIMIT_GROWTH ** max(0, hits - 1)),
                 )
             else:
-                self.shared_rate_limit.consecutive_hits += 1
-                wait = min(RATE_LIMIT_MAX_COOLDOWN, max(RATE_LIMIT_MIN_COOLDOWN, wait))
+                wait = min(WINDOW_RETRY_MAX, WINDOW_RETRY_SECONDS + hits * 0.35)
 
             self.shared_rate_limit.cooldown_seconds = wait
             self.shared_rate_limit.blocked_until = max(self.shared_rate_limit.blocked_until, now + wait)
@@ -135,14 +148,15 @@ class TopupManager:
     def _clear_rate_limit_streak(self) -> None:
         with self._rate_lock:
             self.shared_rate_limit.consecutive_hits = 0
-            self.shared_rate_limit.cooldown_seconds = RATE_LIMIT_INITIAL_COOLDOWN
+            self.shared_rate_limit.last_kind = ""
+            self.shared_rate_limit.cooldown_seconds = WINDOW_RETRY_SECONDS
 
     def _apply_rate_limit(self, rate_limit: RateLimitInfo) -> None:
         derived = derive_retry_settings(rate_limit)
-        self.retry_settings.interval_seconds = float(derived["interval_seconds"])
-        self.retry_settings.max_interval_seconds = float(derived["max_interval_seconds"])
-        self.retry_settings.backoff_multiplier = float(derived["backoff_multiplier"])
-        self.retry_settings.jitter_seconds = float(derived["jitter_seconds"])
+        self.retry_settings.interval_seconds = min(3.0, float(derived["interval_seconds"]))
+        self.retry_settings.max_interval_seconds = min(8.0, float(derived["max_interval_seconds"]))
+        self.retry_settings.backoff_multiplier = min(1.2, float(derived["backoff_multiplier"]))
+        self.retry_settings.jitter_seconds = min(0.5, float(derived["jitter_seconds"]))
 
     def register_card(self, card_id: str, label: str, amount_cents: int) -> WorkerState:
         with self._lock:
@@ -270,7 +284,8 @@ class TopupManager:
                 worker.last_message = response_message(response)
 
                 if response.rate_limit.limit or response.rate_limit.reset_seconds:
-                    self._apply_rate_limit(response.rate_limit)
+                    if not is_transient_topup_failure(response):
+                        self._apply_rate_limit(response.rate_limit)
 
                 rl = response.rate_limit
                 rl_note = ""
@@ -279,10 +294,15 @@ class TopupManager:
 
                 if is_transient_topup_failure(response):
                     wait = self._register_throttle(response)
-                    worker.last_message = f"Rate limited — retry in {wait:.0f}s"
+                    if response.status_code == 429:
+                        worker.last_message = f"Rate limited — retry in {wait:.0f}s"
+                        pause_label = "rate limited"
+                    else:
+                        worker.last_message = f"Window closed — retry in {wait:.0f}s"
+                        pause_label = "window closed"
                     self._log(
-                        f"[{worker.label}] throttled ({response.status_code}): {response_message(response)} — "
-                        f"pausing {wait:.0f}s for all topups (auto-adapting)",
+                        f"[{worker.label}] {pause_label} ({response.status_code}): {response_message(response)} — "
+                        f"retrying in {wait:.0f}s",
                         card_id=worker.card_id,
                         attempt=worker.attempts,
                         status=response.status_code,

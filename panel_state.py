@@ -12,10 +12,10 @@ LOG_PATH = Path(__file__).with_name("panel_log.json")
 MAX_LOG_ENTRIES = 400
 
 DEFAULT_RETRY = {
-    "interval_seconds": 3.0,
-    "max_interval_seconds": 45.0,
-    "backoff_multiplier": 1.4,
-    "jitter_seconds": 0.75,
+    "interval_seconds": 2.0,
+    "max_interval_seconds": 6.0,
+    "backoff_multiplier": 1.15,
+    "jitter_seconds": 0.35,
     "auto": True,
 }
 

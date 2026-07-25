@@ -709,7 +709,7 @@
     function badgeHtml(card) {
       const w = card.worker || {};
       if (w.succeeded) return '<span class="badge ok">Done</span>';
-      if (w.rate_limit_wait > 0 || (w.running && w.last_message && w.last_message.startsWith('Rate limited'))) return '<span class="badge run">Rate limited</span>';
+      if (w.rate_limit_wait > 0 || (w.running && w.last_message && (w.last_message.startsWith('Rate limited') || w.last_message.startsWith('Window closed') || w.last_message.startsWith('Waiting')))) return '<span class="badge run">Rate limited</span>';
       if (w.running) return '<span class="badge run">Retrying</span>';
       if (card.is_lowest_balance) return '<span class="badge low">Lowest</span>';
       return '<span class="badge">Idle</span>';
@@ -723,7 +723,7 @@
       if (w.succeeded) return 'Topup succeeded';
       if (w.rate_limit_wait > 0) return `Rate limited — retry in ${Math.ceil(w.rate_limit_wait)}s`;
       if (!w.running) return w.last_message || 'Stopped';
-      if (w.last_message && w.last_message.startsWith('Rate limited')) return w.last_message;
+      if (w.last_message && (w.last_message.startsWith('Rate limited') || w.last_message.startsWith('Window closed') || w.last_message.startsWith('Waiting'))) return w.last_message;
       if (w.last_message) return w.last_message;
       if (w.last_status) return `Waiting after HTTP ${w.last_status}`;
       return w.attempts ? `Attempt ${w.attempts} in progress` : 'Starting…';
@@ -731,7 +731,7 @@
 
     function workerBadge(w) {
       if (w.succeeded) return '<span class="badge ok">Done</span>';
-      if (w.rate_limit_wait > 0 || (w.running && w.last_message && w.last_message.startsWith('Rate limited'))) return '<span class="badge run">Rate limited</span>';
+      if (w.rate_limit_wait > 0 || (w.running && w.last_message && (w.last_message.startsWith('Rate limited') || w.last_message.startsWith('Window closed') || w.last_message.startsWith('Waiting')))) return '<span class="badge run">Rate limited</span>';
       if (w.running) return '<span class="badge run">Retrying</span>';
       return '<span class="badge">Idle</span>';
     }
