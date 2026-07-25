@@ -10,7 +10,15 @@ from typing import Any
 
 from flask import Flask, Response, jsonify, make_response, render_template, request
 
-from client import SolvoCardClient, parse_curl_command, repair_supabase_cookie
+from client import (
+    SolvoCardClient,
+    SupabaseRefreshError,
+    _decode_supabase_cookie,
+    find_auth_cookie,
+    parse_curl_command,
+    repair_supabase_cookie,
+    session_needs_refresh,
+)
 from panel_state import (
     append_log as persist_log_entry,
     apply_rate_limit,
@@ -32,6 +40,7 @@ manager: TopupManager | None = None
 client: SolvoCardClient | None = None
 state_lock = threading.Lock()
 dashboard_cache: dict[str, Any] = {"updated_at": None, "cards": [], "transactions": []}
+auth_refresh_stop = threading.Event()
 
 
 def emit_log(message: str, extra: dict | None = None) -> None:
@@ -50,12 +59,27 @@ def emit_log(message: str, extra: dict | None = None) -> None:
         pass
 
 
+def persist_client_cookies(cookies: dict[str, str]) -> None:
+    with state_lock:
+        state = load_state()
+        set_cookies(state, cookies)
+        save_state(state)
+    emit_log("Supabase session refreshed", {"level": "success"})
+    invalidate_dashboard_cache()
+
+
 def rebuild_runtime(stop_workers: bool = False) -> None:
     global client, manager
     if stop_workers and manager:
         manager.stop()
     state = load_state()
-    client = SolvoCardClient.from_config({"cookies": get_cookies(state), "impersonate": "chrome146"})
+    client = SolvoCardClient.from_config(
+        {
+            "cookies": get_cookies(state),
+            "impersonate": "chrome146",
+            "on_cookies_updated": persist_client_cookies,
+        }
+    )
     manager = TopupManager(client, retry_settings=retry_settings_from_state(state), on_log=emit_log)
 
 
@@ -403,6 +427,23 @@ def update_retry():
 def run_panel(host: str = "127.0.0.1", port: int = 5050) -> None:
     with state_lock:
         refresh_dashboard()
+
+    def auth_refresh_loop() -> None:
+        while not auth_refresh_stop.wait(60):
+            active = client
+            if not active:
+                continue
+            found = find_auth_cookie(active.cookies)
+            if not found:
+                continue
+            _, raw = found
+            if not session_needs_refresh(_decode_supabase_cookie(raw)):
+                continue
+            if active.refresh_auth_if_needed(force=True):
+                continue
+            emit_log("Session refresh failed — paste fresh cookies in Session tab", {"level": "warn"})
+
+    threading.Thread(target=auth_refresh_loop, daemon=True, name="auth-refresh").start()
     print(f"Open http://{host}:{port}")
     app.run(host=host, port=port, debug=False, threaded=True)
 
@@ -424,7 +465,18 @@ def run_topup_cli(argv: list[str] | None = None) -> None:
         print("Start the panel: run.bat", file=sys.stderr)
         sys.exit(1)
 
-    cli_client = SolvoCardClient.from_config({"cookies": cookies, "impersonate": "chrome146"})
+    def persist_cli_cookies(updated: dict[str, str]) -> None:
+        cli_state = load_state()
+        set_cookies(cli_state, updated)
+        save_state(cli_state)
+
+    cli_client = SolvoCardClient.from_config(
+        {
+            "cookies": cookies,
+            "impersonate": "chrome146",
+            "on_cookies_updated": persist_cli_cookies,
+        }
+    )
 
     def printer(message: str, extra: dict) -> None:
         level = extra.get("level", "info")

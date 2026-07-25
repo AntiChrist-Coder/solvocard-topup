@@ -5,9 +5,10 @@ import json
 import random
 import re
 import string
+import threading
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import unquote
 
 from curl_cffi import requests as cffi_requests
@@ -107,6 +108,108 @@ def _decode_supabase_cookie(raw: str) -> dict[str, Any]:
     value = raw[7:] if raw.startswith("base64-") else raw
     padded = value + "=" * (-len(value) % 4)
     return json.loads(base64.b64decode(padded))
+
+
+SUPABASE_ANON_KEYS: dict[str, str] = {
+    "rspaukqbntfoigduviwo": (
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJzcGF1a3F"
+        "ibnRmb2lnZHV2aXdvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU1ODMxOTMsImV4cCI6MjA5MTE1OTE5M30."
+        "ieR_iuLw7LKZUh3a1-M6LVY6FCBNitbCrjdUCh0wu0k"
+    ),
+}
+
+SESSION_REFRESH_SKEW_SECONDS = 300
+
+
+def find_auth_cookie(cookies: dict[str, str]) -> tuple[str, str] | None:
+    for name, value in cookies.items():
+        if name.startswith("sb-") and name.endswith("-auth-token") and value:
+            return name, value
+    return None
+
+
+def supabase_project_ref(cookie_name: str) -> str:
+    return cookie_name.removeprefix("sb-").removesuffix("-auth-token")
+
+
+def encode_supabase_cookie(session: dict[str, Any]) -> str:
+    payload = json.dumps(session, separators=(",", ":"))
+    return "base64-" + base64.b64encode(payload.encode()).decode()
+
+
+def session_needs_refresh(session: dict[str, Any], skew_seconds: int = SESSION_REFRESH_SKEW_SECONDS) -> bool:
+    expires_at = session.get("expires_at")
+    if isinstance(expires_at, (int, float)):
+        return time.time() >= float(expires_at) - skew_seconds
+    return True
+
+
+def merge_refresh_response(old_session: dict[str, Any], refreshed: dict[str, Any]) -> dict[str, Any]:
+    merged = {**old_session, **refreshed}
+    if "user" not in refreshed and "user" in old_session:
+        merged["user"] = old_session["user"]
+    if "expires_at" not in refreshed and isinstance(refreshed.get("expires_in"), (int, float)):
+        merged["expires_at"] = int(time.time()) + int(refreshed["expires_in"])
+    return merged
+
+
+class SupabaseRefreshError(RuntimeError):
+    pass
+
+
+def refresh_supabase_session(
+    cookies: dict[str, str],
+    *,
+    impersonate: str = DEFAULT_IMPERSONATE,
+    timeout: float = 30.0,
+    force: bool = False,
+) -> tuple[dict[str, str], bool]:
+    found = find_auth_cookie(cookies)
+    if not found:
+        return cookies, False
+
+    cookie_name, raw = found
+    session = _decode_supabase_cookie(raw)
+    if not force and not session_needs_refresh(session):
+        return cookies, False
+
+    refresh_token = session.get("refresh_token")
+    if not isinstance(refresh_token, str) or not refresh_token:
+        raise SupabaseRefreshError("Missing refresh_token in saved session")
+
+    project_ref = supabase_project_ref(cookie_name)
+    anon_key = SUPABASE_ANON_KEYS.get(project_ref)
+    if not anon_key:
+        raise SupabaseRefreshError(f"No anon key configured for Supabase project {project_ref}")
+
+    url = f"https://{project_ref}.supabase.co/auth/v1/token?grant_type=refresh_token"
+    response = cffi_requests.post(
+        url,
+        headers={
+            "apikey": anon_key,
+            "authorization": f"Bearer {anon_key}",
+            "content-type": "application/json;charset=UTF-8",
+            "x-client-info": "supabase-ssr/0.10.0 createBrowserClient",
+            "x-supabase-api-version": "2024-01-01",
+        },
+        json={"refresh_token": refresh_token},
+        impersonate=impersonate,
+        timeout=timeout,
+    )
+
+    try:
+        payload = response.json()
+    except json.JSONDecodeError as exc:
+        raise SupabaseRefreshError(f"Refresh returned HTTP {response.status_code}") from exc
+
+    if response.status_code != 200:
+        message = payload.get("message") or payload.get("error_description") or response.text[:240]
+        raise SupabaseRefreshError(f"Refresh failed ({response.status_code}): {message}")
+
+    updated = dict(cookies)
+    merged = merge_refresh_response(session, payload)
+    updated[cookie_name] = repair_supabase_cookie(encode_supabase_cookie(merged))
+    return updated, True
 
 
 def _parse_rate_limit(headers: dict[str, str]) -> RateLimitInfo:
@@ -255,6 +358,7 @@ class SolvoCardClient:
         base_url: str = "https://www.solvocard.com",
         timeout: float = 60.0,
         impersonate: str = DEFAULT_IMPERSONATE,
+        on_cookies_updated: Callable[[dict[str, str]], None] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.cookies = dict(cookies)
@@ -263,7 +367,9 @@ class SolvoCardClient:
                 self.cookies[name] = repair_supabase_cookie(value)
         self.timeout = timeout
         self.impersonate = impersonate
+        self.on_cookies_updated = on_cookies_updated
         self.session = cffi_requests.Session()
+        self._auth_lock = threading.Lock()
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> "SolvoCardClient":
@@ -271,7 +377,26 @@ class SolvoCardClient:
             cookies=config.get("cookies", {}),
             base_url=config.get("base_url", "https://www.solvocard.com"),
             impersonate=config.get("impersonate", DEFAULT_IMPERSONATE),
+            on_cookies_updated=config.get("on_cookies_updated"),
         )
+
+    def refresh_auth_if_needed(self, *, force: bool = False) -> bool:
+        with self._auth_lock:
+            try:
+                updated, changed = refresh_supabase_session(
+                    self.cookies,
+                    impersonate=self.impersonate,
+                    timeout=self.timeout,
+                    force=force,
+                )
+            except SupabaseRefreshError:
+                return False
+            if not changed:
+                return False
+            self.cookies = updated
+            if self.on_cookies_updated:
+                self.on_cookies_updated(dict(self.cookies))
+            return True
 
     def _access_token(self) -> str | None:
         for name, value in self.cookies.items():
@@ -308,8 +433,10 @@ class SolvoCardClient:
         path: str,
         referer: str | None = None,
         json_body: bool = True,
+        _retried_auth: bool = False,
         **kwargs: Any,
     ) -> ApiResponse:
+        self.refresh_auth_if_needed()
         url = f"{self.base_url}{path}"
         response = self.session.request(
             method,
@@ -320,6 +447,15 @@ class SolvoCardClient:
             timeout=self.timeout,
             **kwargs,
         )
+        if response.status_code == 401 and not _retried_auth and self.refresh_auth_if_needed(force=True):
+            return self._request(
+                method,
+                path,
+                referer=referer,
+                json_body=json_body,
+                _retried_auth=True,
+                **kwargs,
+            )
         text = response.text or ""
         data: Any = None
         content_type = response.headers.get("content-type", "")

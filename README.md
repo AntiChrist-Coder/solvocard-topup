@@ -51,7 +51,7 @@ You need the same cookies your browser uses on [solvocard.com](https://www.solvo
 1. Export or copy cookies as JSON, e.g. `{ "sb-...-auth-token": "...", "cf_clearance": "..." }`.
 2. Paste into the Session tab and click **Connect session**.
 
-Cookies are saved locally to `panel_state.json` and reused on the next run.
+Cookies are saved locally to `panel_state.json` and reused on the next run. The panel **automatically refreshes the Supabase session** (same as the browser) before requests and every ~60 seconds, and saves the updated cookie back to disk.
 
 ## Using the panel
 
@@ -133,7 +133,7 @@ These files are gitignored and stay on your machine. Do not commit or share them
 | Problem | What to try |
 |---------|-------------|
 | No cards loaded | Re-copy curl from DevTools; include `cf_clearance` and `sb-*-auth-token`. |
-| Session expired | Connect again with fresh cookies from the browser. |
+| Session expired | Connect again with fresh cookies from the browser. Auto-refresh handles normal token expiry; if refresh fails, paste a new curl. |
 | Stale UI | Hard refresh: **Ctrl+Shift+R**. Restart `run.bat` if an old server is still running. |
 | Port 5050 in use | Stop the other process or run `python app.py panel --port 5051`. |
 | Cloudflare / auth errors | Export a new curl while logged in; cookies expire quickly. |
